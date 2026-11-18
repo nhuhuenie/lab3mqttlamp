@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Lab 3 - Điều Khiển Đèn ESP32 Qua MQTT</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg-primary: #0f172a;
+      --bg-card: rgba(30, 41, 59, 0.7);
+      --border-color: rgba(255, 255, 255, 0.08);
+      --text-primary: #f8fafc;
+      --text-secondary: #94a3b8;
+      --text-muted: #64748b;
+      --bulb-glow-color: rgba(251, 191, 36, 0.65);
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
+      background: radial-gradient(circle at 50% 0%, #1e293b 0%, #0f172a 100%);
+      color: var(--text-primary);
+      min-height: 100vh;
+      padding: 24px 16px;
+      display: flex;
+      justify-content: center;
+    }
+    .app-container { width: 100%; max-width: 1000px; display: flex; flex-direction: column; gap: 24px; }
+    .app-header {
+      display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px;
+      padding: 20px 24px; background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 16px;
+    }
+    .header-left { display: flex; align-items: center; gap: 16px; }
+    .logo-icon { font-size: 32px; width: 48px; height: 48px; display: flex; align-items: center; justify-content: center; background: rgba(251, 191, 36, 0.15); border-radius: 12px; }
+    h1 { font-size: 1.4rem; font-weight: 700; color: #fff; }
+    .subtitle { font-size: 0.85rem; color: var(--text-secondary); margin-top: 2px; }
+    .badge { display: inline-flex; align-items: center; gap: 8px; padding: 8px 16px; border-radius: 9999px; font-size: 0.85rem; font-weight: 600; }
+    .status-dot { width: 10px; height: 10px; border-radius: 50%; }
+    .badge-connected { background: rgba(16, 185, 129, 0.15); color: #34d399; }
+    .badge-connected .status-dot { background: #10b981; box-shadow: 0 0 10px #10b981; }
+    .badge-connecting { background: rgba(245, 158, 11, 0.15); color: #fbbf24; }
+    .badge-connecting .status-dot { background: #f59e0b; }
+    .badge-disconnected { background: rgba(239, 68, 68, 0.15); color: #f87171; }
+    .badge-disconnected .status-dot { background: #ef4444; }
+    .dashboard-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+    @media (max-width: 768px) { .dashboard-grid { grid-template-columns: 1fr; } }
+    .card { background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 16px; padding: 24px; display: flex; flex-direction: column; }
+    .card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; border-bottom: 1px solid rgba(255, 255, 255, 0.05); padding-bottom: 12px; }
+    .card-header h2 { font-size: 1.15rem; font-weight: 600; }
+    .state-badge { padding: 4px 12px; border-radius: 8px; font-size: 0.8rem; font-weight: 700; }
+    .state-badge.off { background: rgba(100, 116, 139, 0.2); color: #94a3b8; }
+    .state-badge.on { background: rgba(251, 191, 36, 0.2); color: #fde047; box-shadow: 0 0 14px rgba(251, 191, 36, 0.3); }
+    .topic-tag code { background: rgba(15, 23, 42, 0.8); border: 1px solid rgba(255, 255, 255, 0.1); padding: 4px 8px; border-radius: 6px; color: #38bdf8; font-size: 0.825rem; }
+    .lamp-stage { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 30px 10px; border-radius: 12px; background: rgba(15, 23, 42, 0.5); overflow: hidden; min-height: 250px; }
+    .ambient-glow { position: absolute; top: 42%; left: 50%; transform: translate(-50%, -50%); width: 140px; height: 140px; background: radial-gradient(circle, var(--bulb-glow-color) 0%, transparent 75%); border-radius: 50%; opacity: 0; filter: blur(28px); transition: 0.35s; }
+    .bulb-wrapper { position: relative; width: 110px; height: 150px; z-index: 2; }
+    .bulb-svg { width: 100%; height: 100%; }
+    .light-rays { opacity: 0; transition: 0.35s; }
+    .lamp-stage.lamp-on .ambient-glow { opacity: 1; width: 260px; height: 260px; }
+    .lamp-stage.lamp-on .bulb-glass { fill: #fef08a; stroke: #f59e0b; filter: drop-shadow(0 0 16px rgba(251, 191, 36, 0.8)); }
+    .lamp-stage.lamp-on .bulb-filament { stroke: #ea580c; filter: drop-shadow(0 0 6px #ea580c); }
+    .lamp-stage.lamp-on .light-rays { opacity: 1; }
+    .lamp-status-text { margin-top: 18px; text-align: center; z-index: 3; }
+    .status-label { display: block; font-size: 0.8rem; color: var(--text-muted); }
+    #lamp-text-status { display: block; font-size: 1.25rem; font-weight: 800; margin-top: 4px; color: #94a3b8; }
+    .lamp-stage.lamp-on #lamp-text-status { color: #fde047; text-shadow: 0 0 15px rgba(253, 224, 71, 0.4); }
+    .last-sync { font-size: 0.775rem; color: var(--text-muted); margin-top: 4px; display: block; }
+    .control-body { display: flex; flex-direction: column; gap: 20px; }
+    .control-description { color: var(--text-secondary); font-size: 0.9rem; }
+    .button-group { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    .btn { border: none; border-radius: 12px; padding: 16px; cursor: pointer; display: flex; align-items: center; gap: 14px; color: #fff; font-family: inherit; transition: 0.2s; }
+    .btn:active { transform: scale(0.98); }
+    .btn-icon { font-size: 1.5rem; }
+    .btn-title { display: block; font-size: 1.05rem; font-weight: 700; }
+    .btn-payload { display: block; font-size: 0.75rem; font-family: monospace; opacity: 0.85; }
+    .btn-on { background: linear-gradient(135deg, #10b981 0%, #059669 100%); }
+    .btn-on:hover { transform: translateY(-2px); box-shadow: 0 8px 20px rgba(16, 185, 129, 0.4); }
+    .btn-off { background: linear-gradient(135deg, #ef4444 0%, #b91c1c 100%); }
+    .btn-off:hover { transform: translateY(-2px); box-shadow: 0 8px 20px rgba(239, 68, 68, 0.4); }
+    .switch-container { display: flex; align-items: center; justify-content: space-between; padding: 14px 18px; background: rgba(15, 23, 42, 0.6); border-radius: 12px; }
+    .switch { position: relative; width: 50px; height: 26px; }
+    .switch input { opacity: 0; width: 0; height: 0; }
+    .slider { position: absolute; cursor: pointer; inset: 0; background-color: #334155; border-radius: 34px; transition: .3s; }
+    .slider:before { position: absolute; content: ""; height: 18px; width: 18px; left: 4px; bottom: 4px; background: white; border-radius: 50%; transition: .3s; }
+    input:checked + .slider { background-color: #10b981; }
+    input:checked + .slider:before { transform: translateX(24px); }
+    .quick-info { background: rgba(15, 23, 42, 0.5); border-radius: 10px; padding: 14px; display: flex; flex-direction: column; gap: 8px; font-size: 0.85rem; }
+    .info-row { display: flex; justify-content: space-between; }
+    .info-name { color: var(--text-muted); }
+    .info-value { font-family: monospace; color: #38bdf8; }
+    .logs-card { grid-column: 1 / -1; }
+    .logs-container { background: #090d16; border-radius: 10px; height: 160px; overflow-y: auto; padding: 12px; font-family: monospace; font-size: 0.825rem; display: flex; flex-direction: column; gap: 6px; }
+    .log-entry { display: flex; gap: 8px; }
+    .log-time { color: var(--text-muted); }
+    .badge-sys { color: #94a3b8; }
+    .badge-recv { color: #34d399; font-weight: bold; }
+    .badge-send { color: #38bdf8; font-weight: bold; }
+    .btn-sm { padding: 4px 10px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.1); background: transparent; color: var(--text-secondary); cursor: pointer; }
+  </style>
+</head>
+<body>
+  <div class="app-container">
+    <header class="app-header">
+      <div class="header-left">
+        <div class="logo-icon">💡</div>
+        <div>
+          <h1>IoT Smart Lamp Dashboard</h1>
+          <p class="subtitle">Lab 3: Điều khiển & giám sát đèn ESP32 qua giao thức MQTT</p>
+        </div>
+      </div>
+      <div class="header-right">
+        <div id="connection-badge" class="badge badge-connecting">
+          <span class="status-dot"></span>
+          <span id="connection-text">Đang kết nối Broker...</span>
+        </div>
+      </div>
+    </header>
+
+    <main class="dashboard-grid">
+      <section class="card lamp-card">
+        <div class="card-header">
+          <h2>Trạng Thái Đèn (ESP32)</h2>
+          <span id="lamp-state-badge" class="state-badge off">OFF</span>
+        </div>
+
+        <div class="lamp-stage" id="lamp-stage">
+          <div class="ambient-glow" id="ambient-glow"></div>
+          
+          <div class="bulb-wrapper">
+            <svg class="bulb-svg" id="bulb-svg" viewBox="0 0 100 140" xmlns="http://www.w3.org/2000/svg">
+              <line x1="50" y1="0" x2="50" y2="20" stroke="#64748b" stroke-width="3" stroke-linecap="round"/>
+              <rect x="42" y="20" width="16" height="12" rx="2" fill="#475569"/>
+              <line x1="43" y1="24" x2="57" y2="24" stroke="#334155" stroke-width="1.5"/>
+              <line x1="43" y1="28" x2="57" y2="28" stroke="#334155" stroke-width="1.5"/>
+              
+              <path class="bulb-glass" id="bulb-glass" 
+                d="M 50 32 C 36 32, 25 44, 25 60 C 25 74, 35 84, 40 96 L 40 104 C 40 106, 42 108, 45 108 L 55 108 C 58 108, 60 106, 60 104 L 60 96 C 65 84, 75 74, 75 60 C 75 44, 64 32, 50 32 Z" 
+                fill="#334155" stroke="#64748b" stroke-width="2.5"
+              />
+              
+              <path class="bulb-filament" id="bulb-filament" 
+                d="M 43 90 L 45 65 L 48 70 L 52 70 L 55 65 L 57 90" 
+                fill="none" stroke="#94a3b8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+              />
+
+              <g class="light-rays" id="light-rays">
+                <line x1="50" y1="18" x2="50" y2="8" stroke="#fbbf24" stroke-width="3" stroke-linecap="round"/>
+                <line x1="80" y1="40" x2="90" y2="34" stroke="#fbbf24" stroke-width="3" stroke-linecap="round"/>
+                <line x1="88" y1="65" x2="98" y2="65" stroke="#fbbf24" stroke-width="3" stroke-linecap="round"/>
+                <line x1="20" y1="40" x2="10" y2="34" stroke="#fbbf24" stroke-width="3" stroke-linecap="round"/>
+                <line x1="12" y1="65" x2="2" y2="65" stroke="#fbbf24" stroke-width="3" stroke-linecap="round"/>
+              </g>
+            </svg>
+          </div>
+
+          <div class="lamp-status-text">
+            <span class="status-label">Trạng thái hiện tại:</span>
+            <strong id="lamp-text-status">ĐÈN ĐANG TẮT</strong>
+            <span class="last-sync" id="last-sync">Chờ nhận dữ liệu từ ESP32...</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="card control-card">
+        <div class="card-header">
+          <h2>Bảng Điều Khiển</h2>
+          <span class="topic-tag">Topic: <code id="display-topic">esp32/lamp</code></span>
+        </div>
+
+        <div class="control-body">
+          <p class="control-description">Nhấn nút để gửi lệnh JSON đến ESP32 nhằm điều khiển bật/tắt đèn.</p>
+
+          <div class="button-group">
+            <button id="btn-turn-on" class="btn btn-on" type="button">
+              <span class="btn-icon">⚡</span>
+              <div class="btn-text">
+                <span class="btn-title">BẬT ĐÈN</span>
+                <span class="btn-payload">Gửi: {"led": "on"}</span>
+              </div>
+            </button>
+
+            <button id="btn-turn-off" class="btn btn-off" type="button">
+              <span class="btn-icon">⭕</span>
+              <div class="btn-text">
+                <span class="btn-title">TẮT ĐÈN</span>
+                <span class="btn-payload">Gửi: {"led": "off"}</span>
+              </div>
+            </button>
+          </div>
+
+          <div class="switch-container">
+            <span class="switch-label">Công tắc gạt nhanh (Toggle):</span>
+            <label class="switch">
+              <input type="checkbox" id="lamp-switch">
+              <span class="slider round"></span>
+            </label>
+          </div>
+
+          <div class="quick-info">
+            <div class="info-row">
+              <span class="info-name">Broker Server:</span>
+              <span class="info-value">fbcd6c19.ala.eu-central-1.emqxsl.com</span>
+            </div>
+            <div class="info-row">
+              <span class="info-name">Cổng WSS:</span>
+              <span class="info-value">8084</span>
+            </div>
+            <div class="info-row">
+              <span class="info-name">Username:</span>
+              <span class="info-value">nhuhue</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="card logs-card">
+        <div class="card-header">
+          <h2>Nhật Ký Bản Tin MQTT</h2>
+          <button id="btn-clear-logs" class="btn-sm btn-clear" type="button">Xóa nhật ký</button>
+        </div>
+        <div class="logs-container" id="logs-container"></div>
+      </section>
+    </main>
+  </div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/mqtt/5.3.4/mqtt.min.js"></script>
+  <script>
+    const CONFIG = {
+      host: "fbcd6c19.ala.eu-central-1.emqxsl.com",
+      port: 8084,
+      path: "/mqtt",
+      user: "nhuhue",
+      pass: "abc@12345",
+      topic: "esp32/lamp"
+    };
+
+    let client = null;
+    let currentLampState = false;
+    let isInternalStateChange = false;
+
+    const connectionBadge = document.getElementById("connection-badge");
+    const connectionText = document.getElementById("connection-text");
+    const lampStage = document.getElementById("lamp-stage");
+    const lampStateBadge = document.getElementById("lamp-state-badge");
+    const lampTextStatus = document.getElementById("lamp-text-status");
+    const lastSync = document.getElementById("last-sync");
+    const lampSwitch = document.getElementById("lamp-switch");
+    const btnTurnOn = document.getElementById("btn-turn-on");
+    const btnTurnOff = document.getElementById("btn-turn-off");
+    const logsContainer = document.getElementById("logs-container");
+    const btnClearLogs = document.getElementById("btn-clear-logs");
+
+    function addLog(type, msg) {
+      const time = new Date().toTimeString().split(' ')[0];
+      const div = document.createElement("div");
+      div.className = "log-entry";
+      div.innerHTML = `<span class="log-time">${time}</span> <span class="badge-${type.toLowerCase()}">[${type}]</span> <span>${msg}</span>`;
+      logsContainer.appendChild(div);
+      logsContainer.scrollTop = logsContainer.scrollHeight;
+    }
+
+    function updateLampUI(isOn, source = 'esp32') {
+      currentLampState = isOn;
+      if (isOn) {
+        lampStage.classList.add("lamp-on");
+        lampStateBadge.textContent = "ON";
+        lampStateBadge.className = "state-badge on";
+        lampTextStatus.textContent = "ĐÈN ĐANG SÁNG";
+      } else {
+        lampStage.classList.remove("lamp-on");
+        lampStateBadge.textContent = "OFF";
+        lampStateBadge.className = "state-badge off";
+        lampTextStatus.textContent = "ĐÈN ĐANG TẮT";
+      }
+
+      isInternalStateChange = true;
+      lampSwitch.checked = isOn;
+      isInternalStateChange = false;
+
+      lastSync.textContent = `Cập nhật lúc: ${new Date().toLocaleTimeString()}`;
+    }
+
+    function connectMQTT() {
+      const brokerUrl = `wss://${CONFIG.host}:${CONFIG.port}${CONFIG.path}`;
+      const clientId = "web_" + Math.random().toString(16).substring(2, 8);
+
+      addLog("SYS", `Đang kết nối tới ${CONFIG.host}...`);
+
+      client = mqtt.connect(brokerUrl, {
+        clientId: clientId,
+        username: CONFIG.user,
+        password: CONFIG.pass,
+        clean: true,
+        connectTimeout: 7000
+      });
+
+      client.on("connect", () => {
+        connectionBadge.className = "badge badge-connected";
+        connectionText.textContent = "Đã kết nối Broker";
+        addLog("SYS", "Kết nối thành công!");
+
+        client.subscribe(CONFIG.topic, () => {
+          addLog("SYS", `Đã subscribe topic: ${CONFIG.topic}`);
+        });
+      });
+
+      client.on("message", (topic, payload) => {
+        const str = payload.toString().trim();
+        addLog("RECV", `Topic: ${topic} | ${str}`);
+        try {
+          const data = JSON.parse(str);
+          if (data.led) {
+            updateLampUI(data.led.toLowerCase() === "on", 'esp32');
+          }
+        } catch(e) {
+          if (str.includes('"on"') || str === "on") updateLampUI(true, 'esp32');
+          if (str.includes('"off"') || str === "off") updateLampUI(false, 'esp32');
+        }
+      });
+
+      client.on("close", () => {
+        connectionBadge.className = "badge badge-disconnected";
+        connectionText.textContent = "Mất kết nối";
+      });
+    }
+
+    function sendLampCommand(cmd) {
+      if (!client || !client.connected) {
+        alert("Chưa kết nối đến MQTT Broker!");
+        return;
+      }
+      const payload = JSON.stringify({ led: cmd });
+      client.publish(CONFIG.topic, payload, () => {
+        addLog("SEND", `Gửi: ${payload}`);
+        updateLampUI(cmd === "on", 'user');
+      });
+    }
+
+    btnTurnOn.addEventListener("click", () => sendLampCommand("on"));
+    btnTurnOff.addEventListener("click", () => sendLampCommand("off"));
+    lampSwitch.addEventListener("change", (e) => {
+      if (!isInternalStateChange) sendLampCommand(e.target.checked ? "on" : "off");
+    });
+    btnClearLogs.addEventListener("click", () => logsContainer.innerHTML = "");
+
+    window.addEventListener("DOMContentLoaded", () => {
+      updateLampUI(false);
+      connectMQTT();
+    });
+  </script>
+</body>
+</html>
